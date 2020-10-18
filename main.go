@@ -35,7 +35,7 @@ type CommandResult struct {
 	Out             map[string]interface{} `json:"output"`
 	Err             string                 `json:"error"`
 	ExitCode        int                    `json:"exitcode"`
-	Duration        time.Duration          `json:"duration"`
+	CmdDuration     time.Duration          `json:"cmd_duration"`
 	Checked         string                 `json:"success"`
 	CheckedDuration time.Duration          `json:"done_duration"`
 }
@@ -48,8 +48,8 @@ var (
 	varRegexp = regexp.MustCompile(`%\{[a-zA-Z_][a-zA-Z0-9_]*\}`)
 	cmdList   = []string{}
 
-	concurrency int
-	output      string
+	output     string
+	outputFile *os.File
 
 	cmdResults = []CommandResult{}
 	cmdPrefix  = "neutron lbaas-"
@@ -58,6 +58,15 @@ var (
 func main() {
 
 	HandleArguments()
+
+	if output != "/dev/stdout" {
+		of, e := os.OpenFile(output, os.O_CREATE|os.O_RDWR|os.O_APPEND, os.ModeAppend|os.ModePerm)
+		if e != nil {
+			logger.Fatalf("Failed to open file %s for writing.\n", e.Error())
+		}
+		outputFile = of
+		defer outputFile.Close()
+	}
 
 	if !strings.Contains(strings.Join(os.Environ(), ","), "OS_USERNAME=") {
 		fmt.Println("No OS_USERNAME environment found. Execute `source <path/to/openrc>` first!")
@@ -73,7 +82,15 @@ func main() {
 	RunCmds()
 
 	jd, _ := json.MarshalIndent(cmdResults, "", "  ")
-	fmt.Printf("%s\n", jd)
+	if output != "/dev/stdout" {
+		n, e := outputFile.WriteString(string(jd))
+		logger.Printf("Writen to file %s: data-len:%d\n", output, n)
+		if e != nil {
+			logger.Fatalf("Error happens while writing: %s\n", e.Error())
+		}
+	} else {
+		fmt.Printf("%s\n", string(jd))
+	}
 }
 
 // RunCmds Execute the generated commands analyze result.
@@ -85,7 +102,7 @@ func RunCmds() {
 		cr := RunCommand(fullCmd)
 		cr.Seq = i + 1
 
-		logger.Printf("Command(%d/%d): exits with: %d, executing time: %s \n", cr.Seq, len(cmdList), cr.ExitCode, cr.Duration)
+		logger.Printf("Command(%d/%d): exits with: %d, executing time: %s \n", cr.Seq, len(cmdList), cr.ExitCode, cr.CmdDuration)
 
 		// check the command execution.
 		if cr.ExitCode == 0 {
@@ -129,7 +146,7 @@ func CheckExecution(rlt *CommandResult) {
 	}
 	fe := time.Now()
 
-	rlt.CheckedDuration = fe.Sub(fs) + rlt.Duration
+	rlt.CheckedDuration = fe.Sub(fs) + rlt.CmdDuration
 	logger.Printf("Command(%d/%d): check done, done time: %s\n", rlt.Seq, len(cmdList), rlt.CheckedDuration)
 }
 
@@ -163,20 +180,19 @@ func RunCommand(cmd string) CommandResult {
 	cr.Err = err.String()
 	fe := time.Now()
 	cr.ExitCode = c.ProcessState.ExitCode()
-	cr.Duration = fe.Sub(fs)
+	cr.CmdDuration = fe.Sub(fs)
 
 	return cr
 }
 
 // HandleArguments handle user's input.
 func HandleArguments() {
-	flag.IntVar(&concurrency, "concurrency", 1, "If or not do the operations concurrently.")
 	flag.StringVar(&output, "output", "/dev/stdout", "output the result")
 
 	flag.Usage = PrintUsage
 	flag.Parse()
 
-	logger.Printf("concurrency number: %v, output: %s\n", concurrency, output)
+	logger.Printf("output to: %s\n", output)
 
 	neutronArgsIndex := StringArray(os.Args).IndexOf("--")
 	if neutronArgsIndex == -1 {

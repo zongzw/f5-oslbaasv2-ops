@@ -33,6 +33,8 @@
             //     "x:1-5"
             // ]
             "args": [
+                "--output",
+                "b.json",
                 "--",
                 "loadbalancer-list"
             ]
