@@ -25,12 +25,16 @@
                 "OS_CACERT": ""
             },
             // "envFile": "/opt/stack/devstack/openrc",
+            // "args": [
+            //     "--",
+            //     "loadbalancer-show",
+            //     "lb%{x}",
+            //     "++",
+            //     "x:1-5"
+            // ]
             "args": [
                 "--",
-                "loadbalancer-show",
-                "lb%{x}",
-                "++",
-                "x:1-5"
+                "loadbalancer-list"
             ]
             // "args": [
             //     "--cocurrent",

@@ -83,21 +83,21 @@ func RunCmds() {
 		logger.Printf("Command(%d/%d): '%s' starts\n", i+1, len(cmdList), fullCmd)
 
 		cr := RunCommand(fullCmd)
+		cr.Seq = i + 1
 
-		logger.Printf("Command '%s' exits with: %d, executing time: %s \n", cr.Command, cr.ExitCode, cr.Duration)
-		cmdResults = append(cmdResults, cr)
+		logger.Printf("Command(%d/%d): exits with: %d, executing time: %s \n", cr.Seq, len(cmdList), cr.ExitCode, cr.Duration)
 
 		// check the command execution.
-		if cr.ExitCode != 0 {
-			continue
+		if cr.ExitCode == 0 {
+			logger.Printf("Command(%d/%d): Checking Execution\n", cr.Seq, len(cmdList))
+			CheckExecution(&cr)
 		}
-		logger.Printf("Checking Execution: \n")
-		CheckExecution(cr)
+		cmdResults = append(cmdResults, cr)
 	}
 }
 
 // CheckExecution check the execution in backend is done.
-func CheckExecution(rlt CommandResult) {
+func CheckExecution(rlt *CommandResult) {
 	args := strings.Split(rlt.Command, " ")
 	subs := strings.Split(args[1], "-")
 	resourceType, operation := subs[1], subs[2]
@@ -105,7 +105,7 @@ func CheckExecution(rlt CommandResult) {
 	fs := time.Now()
 	if operation == "create" || operation == "update" {
 		checkCmd := fmt.Sprintf("neutron lbaas-%s-show %s", resourceType, rlt.Out["id"])
-		logger.Printf("Checking Command: %s\n", checkCmd)
+		logger.Printf("Command(%d/%d): use command: '%s' to check.\n", rlt.Seq, len(cmdList), checkCmd)
 
 		for true {
 			cr := RunCommand(checkCmd)
@@ -130,6 +130,7 @@ func CheckExecution(rlt CommandResult) {
 	fe := time.Now()
 
 	rlt.CheckedDuration = fe.Sub(fs) + rlt.Duration
+	logger.Printf("Command(%d/%d): check done, done time: %s\n", rlt.Seq, len(cmdList), rlt.CheckedDuration)
 }
 
 // RunCommand run the command and fill CommandResult body
@@ -156,15 +157,7 @@ func RunCommand(cmd string) CommandResult {
 		if e != nil {
 			err.WriteString(e.Error())
 		} else {
-			var o map[string]interface{}
-			e = json.Unmarshal(out.Bytes(), &o)
-			if e != nil {
-				cr.Out = map[string]interface{}{
-					"message": out.Bytes(),
-				}
-			} else {
-				cr.Out = o
-			}
+			cr.Out = ConstructToJSON("message", out.Bytes())
 		}
 	}
 	cr.Err = err.String()
@@ -211,7 +204,7 @@ func HandleArguments() {
 		if !varStart {
 			matches := varRegexp.FindAllString(n, -1)
 			for _, m := range matches {
-				logger.Printf("matched: %s\n", m)
+				logger.Printf("found variable: %s\n", m)
 				l := len(m)
 				varName := m[2 : l-1]
 				variables[varName] = []string{}
@@ -227,8 +220,9 @@ func HandleArguments() {
 		}
 	}
 
+	logger.Printf("variables parsed as\n")
 	for k, v := range variables {
-		logger.Printf("%15s: %v\n", k, v)
+		logger.Printf("%10s: %v\n", k, v)
 	}
 
 	ConstructFromTemplate(neutronCmdArgs, variables)
@@ -294,4 +288,28 @@ func (sa StringArray) IndexOf(item string) int {
 		}
 	}
 	return -1
+}
+
+// ConstructToJSON unify the data stream to json - map[string]interface{}
+// no matter data is unstructed-string / list / json format.
+func ConstructToJSON(givenKey string, data []byte) map[string]interface{} {
+	var jo map[string]interface{}
+
+	e := json.Unmarshal(data, &jo)
+	if e == nil {
+	} else {
+		var lo []interface{}
+		e = json.Unmarshal(data, &lo)
+		if e == nil {
+			jo = map[string]interface{}{
+				givenKey: lo,
+			}
+		} else {
+			jo = map[string]interface{}{
+				givenKey: string(data),
+			}
+		}
+	}
+
+	return jo
 }
